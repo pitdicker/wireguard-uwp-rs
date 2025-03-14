@@ -9,24 +9,26 @@ description = "WireGuard UWP VPN plugin."
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1.0.66"
-base64 = "0.13"
-ipnetwork = "0.18"
-quick-xml = { version = "0.22", features = ["serialize"] }
-rand = "0.8.5"
+base64 = "0.23.1"
+quick-xml = { version = "0.42.0", features = ["serialize"] }
+rand = "0.10.4"
 serde = { version = "1.0", features = ["derive"] }
-serde_with = "1.11"
+serde_with = "3.12.0"
 win_etw_macros = "0.1"
 win_etw_provider = "0.1"
+windows-collections = "0.3"
+windows-core = "0.62"
+
+boringtun = "0.7"
 x25519-dalek = "2.0.1"
 
-# boringtun = "0.6"
-boringtun = { git = "https://github.com/cloudflare/boringtun.git" }
+[dependencies.ipnetwork]
+version = "0.21.1"
+features = ["serde"]
 
 [dependencies.windows]
-version = "0.54.0"
+version = "0.62"
 features = [
-    "implement",
     "ApplicationModel_Background",
     "ApplicationModel_Core",
     "Foundation_Collections",

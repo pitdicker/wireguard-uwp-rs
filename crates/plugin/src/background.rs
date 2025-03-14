@@ -3,22 +3,24 @@
 use std::mem::ManuallyDrop;
 
 use windows::{
-    self as Windows,
     core::*,
+    ApplicationModel::Background::IBackgroundTask,
     ApplicationModel::Background::IBackgroundTaskInstance,
+    ApplicationModel::Background::IBackgroundTask_Impl,
     ApplicationModel::Core::CoreApplication,
     Networking::Vpn::{IVpnPlugIn, VpnChannel},
     Win32::Foundation::{E_INVALIDARG, E_NOINTERFACE, E_UNEXPECTED, S_OK},
     Win32::System::WinRT::IActivationFactory,
+    Win32::System::WinRT::IActivationFactory_Impl,
 };
 
 /// The WinRT Activatable Class which acts as the entrypoint for the background tasks
 /// which get invoked to handle the actual VPN tunnel.
-#[implement(Windows::ApplicationModel::Background::IBackgroundTask)]
+#[implement(IBackgroundTask)]
 pub struct VpnBackgroundTask;
 
-impl Windows::ApplicationModel::Background::IBackgroundTask_Impl for VpnBackgroundTask {
-    fn Run(&self, task: Option<&IBackgroundTaskInstance>) -> Windows::core::Result<()> {
+impl IBackgroundTask_Impl for VpnBackgroundTask_Impl {
+    fn Run(&self, task: Ref<IBackgroundTaskInstance>) -> Result<()> {
         let task = task.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
         let deferral = task.GetDeferral()?;
 
@@ -45,10 +47,10 @@ impl Windows::ApplicationModel::Background::IBackgroundTask_Impl for VpnBackgrou
 ///
 /// Returned by `DllGetActivationFactory` when the system attempts to get an
 /// instance of `VpnBackgroundTask`.
-#[implement(Windows::Win32::System::WinRT::IActivationFactory)]
+#[implement(IActivationFactory)]
 struct VpnBackgroundTaskFactory;
 
-impl Windows::Win32::System::WinRT::IActivationFactory_Impl for VpnBackgroundTaskFactory {
+impl IActivationFactory_Impl for VpnBackgroundTaskFactory_Impl {
     /// Creates and returns a new instance of `VpnBackgroundTask`.
     fn ActivateInstance(&self) -> Result<IInspectable> {
         Ok(VpnBackgroundTask.into())
@@ -66,22 +68,22 @@ impl Windows::Win32::System::WinRT::IActivationFactory_Impl for VpnBackgroundTas
 /// object implementing `IActivationFactory` which knows how to create new instances of the
 /// target WinRT runtime class.
 ///
-/// Since `activatableClassId` is an _In_ parameter, the caller is responsible for freeing it.
+/// Since `activatable_class_id` is an _In_ parameter, the caller is responsible for freeing it.
 /// But the HSTRING wrapper from the windows crate has a `Drop` impl which will attempt to free
 /// it once it goes out of scope. Unfortunately, that would be a double-free once we've returned
 /// back to the caller who would also attempt to free it. Hence, we transparently wrap the HSTRING
 /// with ManuallyDrop to skip any free'ing on the Rust side.
 #[no_mangle]
 pub unsafe extern "system" fn DllGetActivationFactory(
-    activatableClassId: ManuallyDrop<HSTRING>,
+    activatable_class_id: ManuallyDrop<HSTRING>,
     factory: *mut Option<IActivationFactory>,
 ) -> HRESULT {
-    if activatableClassId.is_empty() || factory.is_null() {
+    if activatable_class_id.is_empty() || factory.is_null() {
         return E_INVALIDARG;
     }
 
     // Return the appropriate factory based on which class was requested
-    if *activatableClassId == "WireGuard-UWP.VpnBackgroundTask" {
+    if *activatable_class_id == "WireGuard-UWP.VpnBackgroundTask" {
         *factory = Some(VpnBackgroundTaskFactory.into());
     } else {
         *factory = None;

@@ -3,36 +3,33 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use windows::{
-    self as Windows,
-    core::{implement, AsImpl, Error, Param, Result, RuntimeType, Type},
-    Foundation::Collections::{IIterable, IIterator, IVector, IVectorView},
+    core::{implement, AsImpl, Error, Interface, Ref, Result, RuntimeType, Type, IUnknownImpl},
     Networking::Vpn::VpnPacketBuffer,
     Win32::Foundation::{E_BOUNDS, E_NOTIMPL},
     Win32::System::WinRT::IBufferByteAccess,
 };
-use Windows::core::Interface;
+use windows_collections::{
+    IIterable, IIterable_Impl, IIterator, IIterator_Impl, IVector, IVectorView, IVectorView_Impl,
+    IVector_Impl,
+};
 
 /// A simple wrapper around `Vec` which implements the `IVector`, `IVectorView` and
 /// `IIterable` interfaces.
 #[implement(
-    Windows::Foundation::Collections::IIterable<T>,
-    Windows::Foundation::Collections::IVector<T>,
-    Windows::Foundation::Collections::IVectorView<T>
+    IIterable<T>,
+    IVector<T>,
+    IVectorView<T>
 )]
 pub struct Vector<T>(Vec<T::Default>)
 where
     T: RuntimeType + 'static,
     <T as Type<T>>::Default: PartialEq + Clone;
 
-impl<T> Windows::Foundation::Collections::IVector_Impl<T> for Vector<T>
+impl<T> IVector_Impl<T> for Vector_Impl<T>
 where
     T: RuntimeType + 'static,
     <T as Type<T>>::Default: PartialEq + Clone,
 {
-    fn GetView(&self) -> Result<IVectorView<T>> {
-        Ok(unsafe { self.cast() }?)
-    }
-
     fn GetAt(&self, index: u32) -> Result<T> {
         self.0
             .get(index as usize)
@@ -45,8 +42,12 @@ where
         u32::try_from(self.0.len()).map_err(|_| Error::from(E_BOUNDS))
     }
 
-    fn IndexOf(&self, value: &T::Default, index: &mut u32) -> Result<bool> {
-        if let Some(idx) = self.0.iter().position(|el| el == value) {
+    fn GetView(&self) -> Result<IVectorView<T>> {
+        Ok(self.to_interface::<IVectorView<T>>())
+    }
+
+    fn IndexOf(&self, value: Ref<'_, T>, index: &mut u32) -> Result<bool> {
+        if let Some(idx) = self.0.iter().position(|el| *el == *value) {
             *index = u32::try_from(idx).map_err(|_| Error::from(E_BOUNDS))?;
             Ok(true)
         } else {
@@ -54,26 +55,11 @@ where
         }
     }
 
-    fn GetMany(&self, start: u32, items: &mut [T::Default]) -> Result<u32> {
-        let sz = u32::try_from(self.0.len()).map_err(|_| Error::from(E_BOUNDS))?;
-
-        if start >= sz {
-            return Err(Error::from(E_BOUNDS));
-        }
-
-        let mut count = 0;
-        for (item, el) in items.into_iter().zip(self.0[start as usize..].iter()) {
-            *item = el.clone();
-            count += 1;
-        }
-        Ok(count)
-    }
-
-    fn SetAt(&self, _index: u32, _value: &T::Default) -> Result<()> {
+    fn SetAt(&self, _index: u32, _value: Ref<'_, T>) -> Result<()> {
         Err(E_NOTIMPL.into())
     }
 
-    fn InsertAt(&self, _index: u32, _value: &T::Default) -> Result<()> {
+    fn InsertAt(&self, _index: u32, _value: Ref<'_, T>) -> Result<()> {
         Err(E_NOTIMPL.into())
     }
 
@@ -81,7 +67,7 @@ where
         Err(E_NOTIMPL.into())
     }
 
-    fn Append(&self, _value: &T::Default) -> Result<()> {
+    fn Append(&self, _value: Ref<'_, T>) -> Result<()> {
         Err(E_NOTIMPL.into())
     }
 
@@ -93,12 +79,27 @@ where
         Err(E_NOTIMPL.into())
     }
 
+    fn GetMany(&self, start: u32, items: &mut [T::Default]) -> Result<u32> {
+        let sz = u32::try_from(self.0.len()).map_err(|_| Error::from(E_BOUNDS))?;
+
+        if start >= sz {
+            return Err(Error::from(E_BOUNDS));
+        }
+
+        let mut count = 0;
+        for (item, el) in items.into_iter().zip(self.0[start as usize..].iter()) {
+            *item = el.clone();
+            count += 1;
+        }
+        Ok(count)
+    }
+
     fn ReplaceAll(&self, _values: &[T::Default]) -> Result<()> {
         Err(E_NOTIMPL.into())
     }
 }
 
-impl<T> Windows::Foundation::Collections::IVectorView_Impl<T> for Vector<T>
+impl<T> IVectorView_Impl<T> for Vector_Impl<T>
 where
     T: RuntimeType + 'static,
     <T as Type<T>>::Default: PartialEq + Clone,
@@ -115,8 +116,8 @@ where
         u32::try_from(self.0.len()).map_err(|_| Error::from(E_BOUNDS))
     }
 
-    fn IndexOf(&self, value: &T::Default, index: &mut u32) -> Result<bool> {
-        if let Some(idx) = self.0.iter().position(|el| el == value) {
+    fn IndexOf(&self, value: Ref<T>, index: &mut u32) -> Result<bool> {
+        if let Some(idx) = self.0.iter().position(|el| *el == *value) {
             *index = u32::try_from(idx).map_err(|_| Error::from(E_BOUNDS))?;
             Ok(true)
         } else {
@@ -140,14 +141,14 @@ where
     }
 }
 
-impl<T> Windows::Foundation::Collections::IIterable_Impl<T> for Vector<T>
+impl<T> IIterable_Impl<T> for Vector_Impl<T>
 where
     T: RuntimeType + 'static,
     <T as Type<T>>::Default: PartialEq + Clone,
 {
     fn First(&self) -> Result<IIterator<T>> {
         Ok(VectorIterator::<T> {
-            it: unsafe { self.cast() }?,
+            it: self.to_interface::<IIterable<T>>(),
             curr: AtomicU32::new(0),
         }
         .into())
@@ -164,28 +165,8 @@ where
     }
 }
 
-impl<T> Into<Param<IVectorView<T>>> for Vector<T>
-where
-    T: RuntimeType + 'static,
-    <T as Type<T>>::Default: PartialEq + Clone,
-{
-    fn into(self) -> Param<IVectorView<T>> {
-        Param::Owned(self.into())
-    }
-}
-
-impl<T> Into<Param<IVector<T>>> for Vector<T>
-where
-    T: RuntimeType + 'static,
-    <T as Type<T>>::Default: PartialEq + Clone,
-{
-    fn into(self) -> Param<IVector<T>> {
-        Param::Owned(self.into())
-    }
-}
-
 /// `IIterator` wrapper for `Vector`
-#[implement(Windows::Foundation::Collections::IIterator<T>)]
+#[implement(IIterator<T>)]
 struct VectorIterator<T>
 where
     T: RuntimeType + 'static,
@@ -197,7 +178,7 @@ where
     curr: AtomicU32,
 }
 
-impl<T> Windows::Foundation::Collections::IIterator_Impl<T> for VectorIterator<T>
+impl<T> IIterator_Impl<T> for VectorIterator_Impl<T>
 where
     T: RuntimeType + 'static,
     <T as Type<T>>::Default: PartialEq + Clone,

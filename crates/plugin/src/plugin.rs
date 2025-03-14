@@ -7,7 +7,6 @@ use boringtun::noise::errors::WireGuardError;
 use boringtun::noise::{Tunn, TunnResult};
 use ipnetwork::IpNetwork;
 use windows::{
-    self as Windows,
     core::*,
     Networking::Sockets::*,
     Networking::Vpn::*,
@@ -18,97 +17,6 @@ use windows::{
 use crate::config::WireGuardConfig;
 use crate::logging::WireGuardUWPEvents;
 use crate::utils::{debug_log, IBufferExt, Vector};
-
-// trait VpnChannelOverride {
-//     fn StartO<P0, E0, P1, E1, P2, P3>(
-//         &self,
-//         assignedclientipv4list: P0,
-//         assignedclientipv6list: P1,
-//         vpninterfaceid: Option<&VpnInterfaceId>,
-//         routescope: &VpnRouteAssignment,
-//         namespacescope: &VpnNamespaceAssignment,
-//         mtusize: u32,
-//         maxframesize: u32,
-//         optimizeforlowcostnetwork: bool,
-//         mainoutertunneltransport: P2,
-//         optionaloutertunneltransport: P3,
-//     ) -> ::windows::core::Result<()>
-//     where
-//         P0: ::std::convert::TryInto<
-//             ::windows::core::Param<
-//                 ::core::option::Option<::windows::Foundation::Collections::IVectorView<HostName>>,
-//             >,
-//             Error = E0,
-//         >,
-//         E0: ::std::convert::Into<::windows::core::Error>,
-//         P1: ::std::convert::TryInto<
-//             ::windows::core::Param<
-//                 ::core::option::Option<::windows::Foundation::Collections::IVectorView<HostName>>,
-//             >,
-//             Error = E1,
-//         >,
-//         E1: ::std::convert::Into<::windows::core::Error>,
-//         P2: ::std::convert::Into<::windows::core::Param<::windows::core::IInspectable>>,
-//         P3: ::std::convert::Into<::windows::core::Param<::windows::core::IInspectable>>;
-// }
-
-// impl VpnChannelOverride for VpnChannel {
-//     fn StartO<P0, E0, P1, E1, P2, P3>(
-//         &self,
-//         assignedclientipv4list: P0,
-//         assignedclientipv6list: P1,
-//         vpninterfaceid: Option<&VpnInterfaceId>,
-//         routescope: &VpnRouteAssignment,
-//         namespacescope: &VpnNamespaceAssignment,
-//         mtusize: u32,
-//         maxframesize: u32,
-//         optimizeforlowcostnetwork: bool,
-//         mainoutertunneltransport: P2,
-//         optionaloutertunneltransport: P3,
-//     ) -> ::windows::core::Result<()>
-//     where
-//         P0: ::std::convert::TryInto<
-//             ::windows::core::Param<
-//                 ::core::option::Option<::windows::Foundation::Collections::IVectorView<HostName>>,
-//             >,
-//             Error = E0,
-//         >,
-//         E0: ::std::convert::Into<::windows::core::Error>,
-//         P1: ::std::convert::TryInto<
-//             ::windows::core::Param<
-//                 ::core::option::Option<::windows::Foundation::Collections::IVectorView<HostName>>,
-//             >,
-//             Error = E1,
-//         >,
-//         E1: ::std::convert::Into<::windows::core::Error>,
-//         P2: ::std::convert::Into<::windows::core::Param<::windows::core::IInspectable>>,
-//         P3: ::std::convert::Into<::windows::core::Param<::windows::core::IInspectable>>,
-//     {
-//         let this = self;
-//         unsafe {
-//             (::windows::core::Interface::vtable(this).Start)(
-//                 ::windows::core::Interface::as_raw(this),
-//                 assignedclientipv4list
-//                     .try_into()
-//                     .map_err(|e| e.into())?
-//                     .abi(),
-//                 assignedclientipv6list
-//                     .try_into()
-//                     .map_err(|e| e.into())?
-//                     .abi(),
-//                 ::core::mem::transmute_copy(&vpninterfaceid),
-//                 ::core::mem::transmute_copy(routescope),
-//                 ::core::mem::transmute_copy(namespacescope),
-//                 mtusize,
-//                 maxframesize,
-//                 optimizeforlowcostnetwork,
-//                 mainoutertunneltransport.into().abi(),
-//                 optionaloutertunneltransport.into().abi(),
-//             )
-//             .ok()
-//         }
-//     }
-// }
 
 struct Inner {
     tunn: Option<Box<Tunn>>,
@@ -121,15 +29,15 @@ impl Inner {
 }
 
 /// The VPN plugin object which provides the hooks that the UWP VPN platform will call into.
-#[implement(Windows::Networking::Vpn::IVpnPlugIn)]
+#[implement(IVpnPlugIn)]
 pub struct VpnPlugin {
     inner: Mutex<Inner>,
     etw_logger: WireGuardUWPEvents,
 }
 
-impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
+impl IVpnPlugIn_Impl for VpnPlugin_Impl {
     /// Called by the platform so that we may connect and setup the VPN tunnel.
-    fn Connect(&self, channel: Option<&VpnChannel>) -> Result<()> {
+    fn Connect(&self, channel: Ref<VpnChannel>) -> Result<()> {
         // Call out to separate method so that we can capture any errors
         if let Err(err) = self.connect_inner(channel) {
             self.etw_logger
@@ -141,7 +49,7 @@ impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
     }
 
     /// Called by the platform to indicate we should disconnect and cleanup the VPN tunnel.
-    fn Disconnect(&self, channel: Option<&VpnChannel>) -> Result<()> {
+    fn Disconnect(&self, channel: Ref<VpnChannel>) -> Result<()> {
         // Call out to separate method so that we can capture any errors
         if let Err(err) = self.disconnect_inner(channel) {
             self.etw_logger
@@ -153,61 +61,13 @@ impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
         }
     }
 
-    /// Called by the platform to indicate there are outgoing packets ready to be encapsulated.
-    ///
-    /// `packets` contains outgoing L3 IP packets that we should encapsulate in whatever protocol
-    /// dependant manner before placing them in `encapsulatedPackets` so that they may be sent to
-    /// the remote endpoint.
-    fn Encapsulate(
-        &self,
-        channel: Option<&VpnChannel>,
-        packets: Option<&VpnPacketBufferList>,
-        encapsulatedPackets: Option<&VpnPacketBufferList>,
-    ) -> Result<()> {
-        // Call out to separate method so that we can capture any errors
-        match self.encapsulate_inner(channel, packets, encapsulatedPackets) {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                self.etw_logger
-                    .encapsulate_fail(None, err.code().0 as u32, &err.to_string());
-                Err(err)
-            }
-        }
-    }
-
-    /// Called by the platform to indicate we've received a frame from the remote endpoint.
-    ///
-    /// `buffer` will contain whatever data we received from the remote endpoint which may
-    /// either contain control or data payloads. For data payloads, we will decapsulate into
-    /// 1 (or more) L3 IP packet(s) before returning them to the platform by placing them in
-    /// `decapsulatedPackets`, making them ready to be injected into the virtual tunnel. If
-    /// we need to send back control payloads or otherwise back to the remote endpoint, we
-    /// may place such frames into `controlPackets`.
-    fn Decapsulate(
-        &self,
-        channel: Option<&VpnChannel>,
-        buffer: Option<&VpnPacketBuffer>,
-        decapsulatedPackets: Option<&VpnPacketBufferList>,
-        controlPackets: Option<&VpnPacketBufferList>,
-    ) -> Result<()> {
-        // Call out to separate method so that we can capture any errors
-        match self.decapsulate_inner(channel, buffer, decapsulatedPackets, controlPackets) {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                self.etw_logger
-                    .decapsulate_fail(None, err.code().0 as u32, &err.to_string());
-                Err(err)
-            }
-        }
-    }
-
     /// Called by the platform from time to time so that we may send some keepalive payload.
     ///
     /// If we decide we want to send any keepalive payload, we place it in `keepAlivePacket`.
     fn GetKeepAlivePayload(
         &self,
-        channel: Option<&VpnChannel>,
-        keepAlivePacket: &mut Option<VpnPacketBuffer>,
+        channel: Ref<VpnChannel>,
+        keepAlivePacket: OutRef<VpnPacketBuffer>,
     ) -> Result<()> {
         let channel = channel.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
 
@@ -218,8 +78,6 @@ impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
             // We haven't initalized tunn yet, just return
             return Ok(());
         };
-
-        *keepAlivePacket = None;
 
         // Allocate a temporary buffer on the stack for sending any data.
         let mut dst = [0u8; 1500];
@@ -254,7 +112,9 @@ impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
                 self.etw_logger.keepalive(None, packet.len() as u32);
 
                 // Place the packet in the out param to send to remote
-                *keepAlivePacket = Some(kaPacket);
+                keepAlivePacket.write(Some(kaPacket))?;
+                
+                return Ok(())
             }
 
             // Impossible cases for update_timers
@@ -263,7 +123,56 @@ impl Windows::Networking::Vpn::IVpnPlugIn_Impl for VpnPlugin {
             }
         }
 
+        keepAlivePacket.write(None)?;
         Ok(())
+    }
+
+    /// Called by the platform to indicate there are outgoing packets ready to be encapsulated.
+    ///
+    /// `packets` contains outgoing L3 IP packets that we should encapsulate in whatever protocol
+    /// dependant manner before placing them in `encapsulatedPackets` so that they may be sent to
+    /// the remote endpoint.
+    fn Encapsulate(
+        &self,
+        channel: Ref<VpnChannel>,
+        packets: Ref<VpnPacketBufferList>,
+        encapsulatedPackets: Ref<VpnPacketBufferList>,
+    ) -> Result<()> {
+        // Call out to separate method so that we can capture any errors
+        match self.encapsulate_inner(channel, packets, encapsulatedPackets) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                self.etw_logger
+                    .encapsulate_fail(None, err.code().0 as u32, &err.to_string());
+                Err(err)
+            }
+        }
+    }
+
+    /// Called by the platform to indicate we've received a frame from the remote endpoint.
+    ///
+    /// `buffer` will contain whatever data we received from the remote endpoint which may
+    /// either contain control or data payloads. For data payloads, we will decapsulate into
+    /// 1 (or more) L3 IP packet(s) before returning them to the platform by placing them in
+    /// `decapsulatedPackets`, making them ready to be injected into the virtual tunnel. If
+    /// we need to send back control payloads or otherwise back to the remote endpoint, we
+    /// may place such frames into `controlPackets`.
+    fn Decapsulate(
+        &self,
+        channel: Ref<VpnChannel>,
+        buffer: Ref<VpnPacketBuffer>,
+        decapsulatedPackets: Ref<VpnPacketBufferList>,
+        controlPackets: Ref<VpnPacketBufferList>,
+    ) -> Result<()> {
+        // Call out to separate method so that we can capture any errors
+        match self.decapsulate_inner(channel, buffer, decapsulatedPackets, controlPackets) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                self.etw_logger
+                    .decapsulate_fail(None, err.code().0 as u32, &err.to_string());
+                Err(err)
+            }
+        }
     }
 }
 
@@ -276,7 +185,7 @@ impl VpnPlugin {
     }
 
     /// Internal `Connect` implementation.
-    fn connect_inner(&self, channel: Option<&VpnChannel>) -> Result<()> {
+    fn connect_inner(&self, channel: Ref<VpnChannel>) -> Result<()> {
         let channel = channel.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
         let mut inner = self.inner.lock().unwrap();
 
@@ -316,7 +225,7 @@ impl VpnPlugin {
         let ipv4_addrs = if ipv4_addrs.is_empty() {
             None
         } else {
-            Some(Vector::<HostName>::new(ipv4_addrs).GetView().unwrap())
+            Some(Vector::<HostName>::new(ipv4_addrs).GetView()?)
         };
         let ipv6_addrs = ipv6
             .into_iter()
@@ -328,7 +237,7 @@ impl VpnPlugin {
         let ipv6_addrs = if ipv6_addrs.is_empty() {
             None
         } else {
-            Some(Vector::<HostName>::new(ipv6_addrs).GetView().unwrap())
+            Some(Vector::<HostName>::new(ipv6_addrs).GetView()?)
         };
 
         let build_routes = |routes: Vec<IpNetwork>| -> Result<_> {
@@ -440,10 +349,10 @@ impl VpnPlugin {
 
         debug_log!("Server: {} Port: {}", server.ToString()?.to_string(), port);
 
-        // We "block" here with the call to `.get()` but given this is a UDP socket
+        // We "block" here with the call to `.join()` but given this is a UDP socket
         // connect isn't actually something that will hang (DNS aside perhaps?).
         sock.ConnectAsync(&server, &HSTRING::from(port.to_string()))?
-            .get()?;
+            .join()?;
 
         // Kick off the VPN setup
         channel.Start(
@@ -467,7 +376,7 @@ impl VpnPlugin {
     }
 
     /// Internal `Disconnect` implementation.
-    fn disconnect_inner(&self, channel: Option<&VpnChannel>) -> Result<()> {
+    fn disconnect_inner(&self, channel: Ref<VpnChannel>) -> Result<()> {
         let channel = channel.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
 
         let mut inner = self.inner.lock().unwrap();
@@ -480,9 +389,9 @@ impl VpnPlugin {
 
     fn encapsulate_inner(
         &self,
-        channel: Option<&VpnChannel>,
-        packets: Option<&VpnPacketBufferList>,
-        encapsulatedPackets: Option<&VpnPacketBufferList>,
+        channel: Ref<VpnChannel>,
+        packets: Ref<VpnPacketBufferList>,
+        encapsulatedPackets: Ref<VpnPacketBufferList>,
     ) -> Result<()> {
         let channel = channel.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
         let packets = packets.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
@@ -626,10 +535,10 @@ impl VpnPlugin {
 
     fn decapsulate_inner(
         &self,
-        channel: Option<&VpnChannel>,
-        buffer: Option<&VpnPacketBuffer>,
-        decapsulatedPackets: Option<&VpnPacketBufferList>,
-        controlPackets: Option<&VpnPacketBufferList>,
+        channel: Ref<VpnChannel>,
+        buffer: Ref<VpnPacketBuffer>,
+        decapsulatedPackets: Ref<VpnPacketBufferList>,
+        controlPackets: Ref<VpnPacketBufferList>,
     ) -> Result<()> {
         let channel = channel.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
         let buffer = buffer.as_ref().ok_or(Error::from(E_UNEXPECTED))?;
