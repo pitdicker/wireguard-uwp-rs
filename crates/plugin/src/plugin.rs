@@ -113,8 +113,8 @@ impl IVpnPlugIn_Impl for VpnPlugin_Impl {
 
                 // Place the packet in the out param to send to remote
                 keepAlivePacket.write(Some(kaPacket))?;
-                
-                return Ok(())
+
+                return Ok(());
             }
 
             // Impossible cases for update_timers
