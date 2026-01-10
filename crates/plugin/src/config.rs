@@ -1,12 +1,20 @@
 //! Config parsing.
 
+use base64::engine::{general_purpose::GeneralPurposeConfig, DecodePaddingMode};
 use base64::prelude::BASE64_STANDARD;
-use base64::Engine;
+use base64::{alphabet, engine, Engine};
 use ipnetwork::IpNetwork;
 use serde::{Deserialize, Serializer};
 use serde_with::serde_as;
 use std::net::IpAddr;
 use x25519_dalek::{PublicKey, StaticSecret};
+
+const BASE64_FORGIVING: engine::GeneralPurpose = engine::GeneralPurpose::new(
+    &alphabet::STANDARD,
+    GeneralPurposeConfig::new()
+        .with_decode_padding_mode(DecodePaddingMode::Indifferent)
+        .with_decode_allow_trailing_bits(true),
+);
 
 fn as_base64_privkey<S>(key: &StaticSecret, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -30,9 +38,9 @@ where
     use serde::de::Error;
     String::deserialize(deserializer)
         .and_then(|string| {
-            BASE64_STANDARD
+            BASE64_FORGIVING
                 .decode(&string)
-                .map_err(|err| Error::custom(err.to_string()))
+                .map_err(|_| Error::custom("failed to deserialize public key"))
         })
         .map(|bytes| TryInto::<[u8; 32]>::try_into(bytes).map(S::from).ok())
         .and_then(|opt| opt.ok_or_else(|| Error::custom("failed to deserialize public key")))
@@ -47,7 +55,7 @@ where
     use serde::de::Error;
     match Option::<String>::deserialize(deserializer) {
         Ok(s) => match s {
-            Some(s) => match BASE64_STANDARD.decode(&s) {
+            Some(s) => match BASE64_FORGIVING.decode(&s) {
                 Ok(b) => match b.try_into() {
                     Ok(b) => Ok(Some(b)),
                     Err(_) => Err(Error::custom("invalid pre-shared key")),
